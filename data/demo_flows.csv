@@ -1,0 +1,13 @@
+id,proto,service,dur,sbytes,dbytes,label,attack_cat
+101,tcp,http,0.12,320,1200,0,Normal
+101,udp,dns,0.03,88,64,0,Normal
+103,tcp,ftp,2.40,9800,210,1,Exploits
+104,tcp,http,1.10,7300,520,1,DoS
+105,tcp,-,0.80,5100,30,1,Generic
+106,udp,dns,0.02,70,128,0,Normal
+107,tcp,http,3.50,12000,800,1,Exploits
+108,tcp,smtp,0.40,350,420,0,Normal
+109,udp,-,0.10,800,0,1,Reconnaissance
+110,tcp,http,0.70,1300,1700,1,DoS
+111,tcp,-,0.05,240,0,,Unknown
+112,udp,dns,0.01,60,80,unknown,Unknown
