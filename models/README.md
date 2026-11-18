@@ -49,3 +49,24 @@ class DetectionModel:
 5. Python、scikit-learn、joblib、PyTorch 的实际版本、训练划分和随机种子记录。B 当前依赖不包含训练库，待 A 交付后合并、验证并固定版本。
 
 首次联调应核对：输入行数与输出长度、0/1 语义、阈值等于 0.5 的攻击判定、缺失值、未知类别、重启加载一致性，以及 B 导出的指标与 A 结果相符。
+
+## MLP 训练报告展示约定（可选增补）
+
+模型加载接口保持不变。A 若要让 B 展示实际训练过程，请另交付 `models/mlp_training_report.json`。缺少报告不影响预测，只显示“尚未交付训练记录”。B 在点击开始检测时读取一次并保存快照；更新报告后需重新开始检测。
+
+可从 [空模板](../data/mlp_training_report.example.json) 填写，所有数值必须来自实际训练。模板的 `report_type=template` 会被明确拒绝作为真实记录；填完真实内容后设置为 `training_run`。
+
+| 字段 | 内容与检查 |
+| --- | --- |
+| `schema_version` | 当前为 1 |
+| `report_type` | 实际报告为 `training_run` |
+| `model_id` | 必须是 `mlp` |
+| `model_version` | 必须与 `get_model_metadata()` 中本次 MLP 的版本完全相同 |
+| `framework`、`architecture` | 实际框架与网络结构说明，不能照抄计划结构冒充实际结构 |
+| `training.dataset_name` | 训练/验证数据来源与划分说明 |
+| `training.train_samples`、`validation_samples`、`batch_size` | 正整数 |
+| `training.seed`、`device`、`optimizer`、`learning_rate`、`loss` | 实际随机种子、设备、优化器、正学习率和损失函数 |
+| `history` | 非空列表，每行含递增正整数 `epoch`、非负有限数值 `train_loss`、`val_loss` |
+| `history` 可选列 | `val_f1`、`val_accuracy` 使用 0～1 小数，允许缺失；不提供时不画对应曲线 |
+
+不要写入 NaN、Infinity、重复轮次或百分数 90。模型训练、最佳检查点选择和报告生成由 A 完成；B 不在检测阶段重新训练或推断网络结构。版本不符的报告不会与当前 MLP 结果混用。训练配置与原始报告可以展开查看和下载，以便核对曲线来源。

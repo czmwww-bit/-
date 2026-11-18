@@ -2,12 +2,15 @@
 import importlib
 from pathlib import Path
 
+# 固定模型目录与模型标识；具体文件格式由 A 的适配器决定。
 MODEL_DIR = Path(__file__).parent / "models"
-REAL_NAMES = {"rf": "随机森林", "mlp": "PyTorch MLP"}
+REAL_NAMES = {"mlp": "PyTorch MLP（深度学习主模型）", "rf": "随机森林（基线对照）"}
 
 
 def discover_real_models() -> tuple[dict, dict]:
+    """检查 A 的入口和模型说明，返回可用模型与不可用原因，不执行预测。"""
     metadata, issues = {}, {}
+    # 1. 检查模块和两个约定入口，缺失时让界面显示原因，而非直接崩溃。
     try:
         adapter = importlib.import_module("model_adapter")
         if not callable(getattr(adapter, "load_model", None)):
@@ -20,6 +23,7 @@ def discover_real_models() -> tuple[dict, dict]:
     except Exception as exc:
         reason = f"{type(exc).__name__}: {exc}。待 A 提供 model_adapter.py、完整模型包及特征清单。"
         return metadata, {key: reason for key in REAL_NAMES}
+    # 2. 逐个检查模型；一个未交付时，另一个仍可以独立接入。
     for key in REAL_NAMES:
         try:
             meta = supplied[key]
@@ -27,6 +31,7 @@ def discover_real_models() -> tuple[dict, dict]:
                 raise ValueError("缺少模型名称 name")
             if not isinstance(meta.get("version"), str) or not meta["version"].strip():
                 raise ValueError("缺少模型版本 version（建议使用完整模型包内容哈希）")
+            # 名称用于展示，版本用于识别结果；特征名称、类型必须完整匹配。
             names, dtypes = meta.get("feature_names"), meta.get("feature_dtypes")
             if not isinstance(names, list) or not names or any(not isinstance(n, str) for n in names) or len(set(names)) != len(names):
                 raise ValueError("缺少有序且不重复的 feature_names")
@@ -39,6 +44,7 @@ def discover_real_models() -> tuple[dict, dict]:
 
 
 def load_real_model(model_id):
+    """通过 A 的加载函数取得模型对象，由检测服务调用其预测方法。"""
     # A 的函数命名若不同，只需修改本文件两个桥接调用，不修改 A 的实现。
     adapter = importlib.import_module("model_adapter")
     return adapter.load_model(model_id, MODEL_DIR)

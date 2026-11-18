@@ -1,3 +1,4 @@
+"""核心验证：用固定样例检查指标、数据对齐、失败处理及导出。"""
 import io
 import unittest
 from types import SimpleNamespace
@@ -16,19 +17,24 @@ from model_registry import discover_real_models
 
 
 class CoreTests(unittest.TestCase):
+    """独立验证业务函数，不启动浏览器，也不依赖真实模型。"""
     def setUp(self):
+        """每个测试开始前，重新读取示例数据，避免测试相互影响。"""
         self.dataset = demo_dataset()
 
     def detect(self, loader=DemoModel, models=None, batch_size=3, dataset=None, metadata=None):
+        """封装测试常用的双模型调用，允许替换模型或输入制造边界情况。"""
         return run_detection(dataset or self.dataset, models or ["rf", "mlp"], metadata or DEMO_METADATA,
                              loader, "debug", batch_size)
 
     def test_reference_metrics(self):
+        """用老师可手算的四格数量核对五项指标。"""
         metrics = metrics_from_counts(40, 50, 5, 5)
         for name, expected in zip(METRICS, [.9, 40 / 45, 40 / 45, 80 / 90, 5 / 55]):
             self.assertAlmostEqual(metrics[name], expected)
 
     def test_zero_denominators_and_extreme_classes(self):
+        """验证全正常、全攻击、无告警和空结果时的分母为零处理。"""
         for counts, unavailable in [((0, 10, 0, 0), ["Precision", "Recall", "F1"]),
                                     ((10, 0, 0, 0), ["FPR"]),
                                     ((0, 0, 0, 10), ["Precision", "FPR"]),
@@ -40,6 +46,7 @@ class CoreTests(unittest.TestCase):
                     self.assertTrue(metrics[f"{name}_reason"])
 
     def test_label_missing_invalid_and_no_label(self):
+        """验证标签三种状态，以及无标签记录只能预测、不能评估。"""
         labels, status = normalize_labels(pd.Series([0, 1, "0", "1", None, "", " ", "NA", 2, -.1, np.inf]))
         self.assertEqual(status.tolist(), ["valid"] * 4 + ["missing"] * 3 + ["invalid"] * 4)
         results, _ = self.detect()
@@ -53,6 +60,7 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(evaluate_results(results)["Accuracy"])
 
     def test_stable_ids_duplicate_original_id_and_line_numbers(self):
+        """验证文件改名不改身份、重复原始 id 不冲突、物理行号不丢失。"""
         a = read_dataset(b'id,proto\n7,tcp\n\n7,"multi\nline"\n', "a.csv")
         b = read_dataset(b'id,proto\n7,tcp\n\n7,"multi\nline"\n', "renamed.csv")
         self.assertEqual(a.dataset_id, b.dataset_id)
@@ -61,6 +69,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(a.records.source_row.tolist(), [2, 4])
 
     def test_malformed_csv_and_empty(self):
+        """验证空文件、重复表头、错列和非法引号会被明确拒绝。"""
         for data in [b"", b"id,id\n1,2\n", b"a,b\n1,2,3\n", b'a,b\n"oops,2\n']:
             with self.subTest(data=data), self.assertRaises(ValueError):
                 read_dataset(data, "bad.csv")
@@ -72,6 +81,7 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(evaluate_results(results.iloc[:0])["Accuracy"])
 
     def test_threshold_and_batch_alignment(self):
+        """验证每批进度、原始编号与得分对齐，以及 0.5 判为攻击。"""
         progress = []
         results, failures = run_detection(self.dataset, ["rf", "mlp"], DEMO_METADATA, DemoModel, "debug", 5,
                                           lambda done, total, text: progress.append((done, total)))
@@ -84,6 +94,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(results.loc[(results.model_id == "rf") & (results.source_row == 6), "predicted_label"].iloc[0], 1)
 
     def test_invalid_model_outputs(self):
+        """验证得分的形状、长度、类型、有限性和范围约束。"""
         bad = [np.array([[.2]]), np.array([]), np.array([np.nan]), np.array([np.inf]),
                np.array([-.01]), np.array([1.01]), np.array(["0.2"]), np.array([.1j]), [.2]]
         for values in bad:
@@ -92,6 +103,7 @@ class CoreTests(unittest.TestCase):
         np.testing.assert_array_equal(validate_scores(np.array([0., .5, 1.]), 3), [0., .5, 1.])
 
     def test_feature_isolation_order_types_and_missing(self):
+        """验证标签隔离、特征列顺序、保留缺失及非法数字的行号提示。"""
         raw = b"id,proto,dur,label,attack_cat,record_id,Accuracy,attack_score\n1,tcp,,1,DoS,spoof,1,1\n"
         dataset = read_dataset(raw, "features.csv")
         features = prepare_features(dataset, {"feature_names": ["dur", "proto"], "feature_dtypes": {"dur": "numeric"}})
@@ -106,8 +118,11 @@ class CoreTests(unittest.TestCase):
             prepare_features(invalid, {"feature_dtypes": {"dur": "numeric"}})
 
     def test_partial_failure_not_normal_and_fair_comparison(self):
+        """验证失败不算正常，且模型比较只用双方共同有效的记录。"""
         class SometimesFails(DemoModel):
+            """让 RF 第二批返回 NaN，模拟得分校验失败。"""
             def predict_attack_scores(self, features):
+                """仅破坏指定批次，便于核对其他批次是否继续完成。"""
                 if self.model_id == "rf" and features.index.min() == 3:
                     return np.array([np.nan] * len(features))
                 return super().predict_attack_scores(features)
@@ -124,7 +139,9 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(common.common_evaluation_records.eq(7).all())
 
     def test_loader_failure_and_missing_columns(self):
+        """验证缺少模型文件或必需特征时，结果保留失败原因和空预测。"""
         def missing_loader(key):
+            """模拟模型文件不存在，而不依赖本机实际文件状态。"""
             raise FileNotFoundError("缺少 models/test-model")
         results, failures = self.detect(loader=missing_loader)
         self.assertEqual(len(failures), 2)
@@ -136,6 +153,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(all("缺少模型必需列" in failure["reason"] for failure in failures))
 
     def test_confusion_categories_disagreements(self):
+        """核对矩阵轴向、按类别统计的漏报数及模型分歧数量。"""
         results, _ = self.detect()
         frame = results.loc[results.model_id.eq("rf")]
         np.testing.assert_array_equal(confusion_matrix(frame), [[3, 1], [2, 4]])
@@ -146,11 +164,13 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(differences.record_id.is_unique)
 
     def test_exports_match_filter_and_configuration(self):
+        """验证导出对应筛选结果，以及数据/模式/模型/版本变化会改变配置。"""
         results, _ = self.detect()
         filtered = filter_results(results, ["rf"], "1", "false_positive", "", "source_row", False)
         self.assertEqual(len(filtered), 1)
         queried = filter_results(results, ["rf", "mlp"], "all", "all", "3", "source_row", False)
         self.assertEqual(queried.source_row.tolist(), [3, 3])
+        # CSV 写出后再读回，确认 BOM、编号、调试标识和阈值没有丢失。
         exported = csv_bytes(filtered)
         self.assertTrue(exported.startswith(b"\xef\xbb\xbf"))
         restored = pd.read_csv(io.BytesIO(exported))
@@ -160,6 +180,7 @@ class CoreTests(unittest.TestCase):
         metrics = build_metrics_table(results)
         restored_metrics = pd.read_csv(io.BytesIO(csv_bytes(metrics)))
         self.assertAlmostEqual(restored_metrics.Accuracy.iloc[0], metrics.Accuracy.iloc[0])
+        # 分别改变一个配置项，确认界面能据此识别过期结果。
         config = run_configuration(self.dataset, "debug", ["rf"], DEMO_METADATA, 3)
         self.assertNotEqual(config, run_configuration(self.dataset, "real", ["rf"], DEMO_METADATA, 3))
         self.assertNotEqual(config, run_configuration(self.dataset, "debug", ["mlp"], DEMO_METADATA, 3))
@@ -169,6 +190,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotEqual(config, run_configuration(self.dataset, "debug", ["rf"], changed_metadata, 3))
 
     def test_registry_missing_and_metadata_validation(self):
+        """验证缺少 A 的模块或某个模型说明不完整时，给出不可用状态。"""
         with patch("model_registry.importlib.import_module", side_effect=ModuleNotFoundError("model_adapter")):
             metadata, issues = discover_real_models()
             self.assertFalse(metadata)
@@ -182,4 +204,5 @@ class CoreTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # 直接执行此文件时，启动 unittest 测试入口。
     unittest.main()

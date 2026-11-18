@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "report_type": "template",
+  "model_id": "mlp",
+  "model_version": "替换为 get_model_metadata 中的实际 MLP 版本",
+  "framework": "PyTorch",
+  "architecture": "填写实际网络结构、输入维度和输出变换",
+  "training": {
+    "dataset_name": "填写实际训练与验证数据来源及划分说明",
+    "train_samples": null,
+    "validation_samples": null,
+    "seed": null,
+    "device": "填写实际设备",
+    "optimizer": "填写实际优化器",
+    "learning_rate": null,
+    "batch_size": null,
+    "loss": "填写实际损失函数"
+  },
+  "history": []
+}

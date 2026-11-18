@@ -75,3 +75,40 @@ Windows，Python 3.12.14（64 位），项目内 `.venv`。最初终端没有 `p
 当前 A 接入契约是 B 的预留桥接方案，未假设已经存在。A 的交接文件、调用示例和版本要求见 [models/README.md](models/README.md)。交付后首先映射 `model_registry.py` 的元数据和加载两个调用，再用 A 提供的固定小型验证 CSV 和真实得分核对；预处理、RF 和 MLP 实现仍归 A。
 
 中期演示按 README 的 3 分钟脚本执行。调试样例用于证明 B 的操作与评估链路，汇报中应明确真实模型仍待交付。
+
+## 2026-11-18：MLP 主线分析增补验证
+
+用户确认本次只完善 B：以 MLP 为主，增加 ROC/PR、得分分析和训练记录展示，训练及权重仍由 A 交付。读取了最新远程 `main`，提交 `2fd8af8` 只是合并此前的 B 分支，没有新增 A 的代码或模型。本地中文注释修改保留，未用远程文件覆盖。
+
+当前依赖不变，仍使用本文件记录的 Python、Streamlit、pandas、NumPy 和 Plotly 版本。执行现有与新增测试：**24 项全部通过**；模块编译、`pip check` 和 `git diff --check` 通过。
+
+新增测试覆盖：
+
+- 手算标签 `[0,0,1,1]`、得分 `[0.1,0.4,0.35,0.8]`：ROC-AUC=0.75，AP=5/6。
+- 完美排序、逆序、同分及反转同分行顺序；同分一起处理，不产生虚假的排序差异。
+- 空结果、无标签、仅正常、仅攻击，以及失败/NaN/无穷/越界得分的排除与 N/A 原因。
+- 阈值附近样本允许标签缺失，但不包含失败或非法得分。
+- 训练报告的模式隔离、缺失、BOM 编码、损坏 JSON、模板、版本不符、重复轮次和非法损失/指标。
+- 用明确的人工测试记录验证训练损失、验证指标图和下载按钮的显示分支；这些记录不作为项目训练结果。
+- AppTest 验证默认选中顺序及默认关注模型为 MLP；调整边界观察范围不增加推理次数，不改变任何保存的预测或阈值。
+
+启动独立验证实例：
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.headless true --server.address 127.0.0.1 --server.port 8502
+```
+
+Chrome 实测：首个页签为“深度学习分析”；ROC、PR、得分分布、共同样本对照及无训练记录状态正确展示；流量页签查询仍保留当前页签。约 1440 像素窗口与 1280×800 视口都没有页面横向溢出。得分分布四组累计 12 条成功 MLP 记录，不漏掉无标签/非法标签记录；绘图分箱支持 0 与 1 两个端点。
+
+固定调试数据的分析结果（**不是实际模型性能**）：MLP 有效评估 10 条，ROC-AUC=0.9166666666666666、AP≈0.9484126984；RF 基线 ROC-AUC≈0.7916666667、AP≈0.8555555556。观察范围 ±0.10 内有 2 条 MLP 记录。共同样本比较仍使用同一批 10 条有效记录。
+
+实际浏览器下载并回读核对了五类 CSV：筛选结果 2 行、完整预测 24 行、指标 4 行、MLP 曲线点 11 行、阈值附近记录 2 行。全部含 UTF-8 BOM、debug 模式和“界面调试数据”标识。额外从下载的完整曲线重新计算 AUC/AP，与指标文件一致；预测及边界结果的阈值均为 0.5。曲线中的 `score_threshold=inf` 仅表示无告警起点。
+
+新截图和报告存放于 `results/deep_learning_browser/`，属于 gitignore 排除的本地验证产物：
+
+- [1280 视口 MLP 曲线](results/deep_learning_browser/mlp_curves_1280.png)
+- [MLP 曲线与指标](results/deep_learning_browser/mlp_curves_1440.png)
+- [得分分布与边界样本](results/deep_learning_browser/mlp_scores_1440.png)
+- [浏览器报告](results/deep_learning_browser/browser_report.json)
+
+实际 MLP 训练过程、权重加载及真实 UNSW-NB15 数据表现仍未验证，原因是 A 尚未交付对应材料。训练报告的实际数据分支已做功能测试，不能据此声称项目已完成真实训练。字段格式及交付位置见 `models/README.md` 和 `data/mlp_training_report.example.json`。
